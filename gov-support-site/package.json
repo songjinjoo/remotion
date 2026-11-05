@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "check": "tsx scripts/check-collect.ts"
   },
   "dependencies": {
     "next": "15.1.6",
@@ -16,6 +17,7 @@
     "@types/node": "22.10.5",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
+    "tsx": "^4.19.2",
     "typescript": "5.7.3"
   }
 }
