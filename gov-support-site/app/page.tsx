@@ -17,7 +17,7 @@ export default function Home() {
     <>
       <header className="nav">
         <strong>지원톡</strong>
-        <a href="#subscribe">구독하기</a>
+        <span><a href="/announcements" style={{marginRight: 16}}>공고 보기</a><a href="#subscribe">구독하기</a></span>
       </header>
 
       <main>

@@ -45,3 +45,11 @@ export async function saveAnnouncements(incoming: Announcement[]): Promise<{adde
   await fs.writeFile(FILE, JSON.stringify(all, null, 2));
   return {added, total: all.length};
 }
+
+export async function deleteAnnouncement(id: string): Promise<boolean> {
+  const all = await readAnnouncements();
+  const next = all.filter((a) => a.id !== id);
+  if (next.length === all.length) return false;
+  await fs.writeFile(FILE, JSON.stringify(next, null, 2));
+  return true;
+}
