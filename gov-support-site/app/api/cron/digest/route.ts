@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   const dryRun = url.searchParams.get('dryRun') === '1' || !canSend;
   const base = process.env.SITE_URL || url.origin;
 
-  const [subs, anns] = await Promise.all([readSubscribers(), readAnnouncements()]);
+  const [subs, anns] = await Promise.all([readSubscribers(), readAnnouncements({openOn: kstToday()})]);
   const today = kstToday();
   const results: {email: string; status: string; count?: number; subject?: string}[] = [];
 

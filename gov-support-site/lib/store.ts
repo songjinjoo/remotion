@@ -1,5 +1,4 @@
-import {promises as fs} from 'fs';
-import path from 'path';
+import {query, tx} from './db';
 
 export type Subscriber = {
   email: string;
@@ -16,45 +15,57 @@ export type Subscriber = {
   lastSentAt?: string;
 };
 
-// MVP storage: a local JSON file. Replace with a real DB before production
-// (serverless hosts have read-only/ephemeral filesystems).
-const FILE = path.join(process.cwd(), 'data', 'subscribers.json');
+type Row = {
+  email: string; industries: string[]; regions: string[]; support_types: string[]; keywords: string[];
+  stage: string; frequency: string; created_at: Date; last_sent_at: Date | null; sent_ids: string[];
+};
 
 export async function readSubscribers(): Promise<Subscriber[]> {
-  try {
-    return JSON.parse(await fs.readFile(FILE, 'utf8')) as Subscriber[];
-  } catch {
-    return [];
-  }
-}
-
-async function writeAll(all: Subscriber[]) {
-  await fs.mkdir(path.dirname(FILE), {recursive: true});
-  await fs.writeFile(FILE, JSON.stringify(all, null, 2));
+  const rows = await query<Row>(`
+    SELECT s.*, COALESCE(array_agg(a.announcement_id) FILTER (WHERE a.announcement_id IS NOT NULL), '{}') AS sent_ids
+    FROM subscribers s LEFT JOIN sent_announcements a ON a.email = s.email
+    GROUP BY s.email ORDER BY s.created_at`);
+  return rows.map((r) => ({
+    email: r.email,
+    industries: r.industries,
+    regions: r.regions,
+    supportTypes: r.support_types,
+    keywords: r.keywords,
+    stage: r.stage,
+    frequency: r.frequency,
+    createdAt: r.created_at.toISOString(),
+    sentIds: r.sent_ids,
+    lastSentAt: r.last_sent_at?.toISOString(),
+  }));
 }
 
 export async function upsertSubscriber(sub: Subscriber): Promise<'created' | 'updated'> {
-  const all = await readSubscribers();
-  const idx = all.findIndex((s) => s.email === sub.email);
-  if (idx >= 0) all[idx] = {...all[idx], ...sub, createdAt: all[idx].createdAt};
-  else all.push(sub);
-  await writeAll(all);
-  return idx >= 0 ? 'updated' : 'created';
+  const [row] = await query<{inserted: boolean}>(
+    `INSERT INTO subscribers (email, industries, regions, support_types, keywords, stage, frequency)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (email) DO UPDATE SET
+       industries = EXCLUDED.industries, regions = EXCLUDED.regions, support_types = EXCLUDED.support_types,
+       keywords = EXCLUDED.keywords, stage = EXCLUDED.stage, frequency = EXCLUDED.frequency
+     RETURNING (xmax = 0) AS inserted`,
+    [sub.email, sub.industries, sub.regions, sub.supportTypes, sub.keywords ?? [], sub.stage, sub.frequency],
+  );
+  return row.inserted ? 'created' : 'updated';
 }
 
 export async function markSent(email: string, ids: string[], at = new Date().toISOString()) {
-  const all = await readSubscribers();
-  const s = all.find((x) => x.email === email);
-  if (!s) return;
-  s.sentIds = [...new Set([...(s.sentIds ?? []), ...ids])].slice(-2000);
-  s.lastSentAt = at;
-  await writeAll(all);
+  await tx(async (c) => {
+    if (ids.length) {
+      await c.query(
+        `INSERT INTO sent_announcements (email, announcement_id, sent_at)
+         SELECT $1, unnest($2::text[]), $3 ON CONFLICT DO NOTHING`,
+        [email, ids, at],
+      );
+    }
+    await c.query('UPDATE subscribers SET last_sent_at = $2 WHERE email = $1', [email, at]);
+  });
 }
 
 export async function removeSubscriber(email: string): Promise<boolean> {
-  const all = await readSubscribers();
-  const next = all.filter((s) => s.email !== email);
-  if (next.length === all.length) return false;
-  await writeAll(next);
-  return true;
+  const rows = await query('DELETE FROM subscribers WHERE email = $1 RETURNING email', [email]);
+  return rows.length > 0;
 }

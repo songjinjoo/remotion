@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {readAnnouncements} from '@/lib/announcements';
 import {isOpen} from '@/lib/match';
+import {kstToday} from '@/lib/digest';
 import {REGIONS, SUPPORT_TYPES} from '@/lib/options';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,7 @@ type Props = {searchParams: Promise<{region?: string; type?: string}>};
 
 export default async function AnnouncementsPage({searchParams}: Props) {
   const {region, type} = await searchParams;
-  const all = (await readAnnouncements()).filter((a) => isOpen(a));
+  const all = (await readAnnouncements({openOn: kstToday()})).filter((a) => isOpen(a, kstToday()));
   const list = all
     .filter((a) => !region || a.regions.includes('전국') || a.regions.includes(region))
     .filter((a) => !type || a.supportTypes.includes(type))
