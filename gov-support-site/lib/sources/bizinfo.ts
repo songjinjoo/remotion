@@ -9,53 +9,106 @@ import {
 
 /**
  * 기업마당(bizinfo.go.kr) 지원사업정보 API.
- * Key: https://www.bizinfo.go.kr → 정책정보 → 지원사업정보 API 신청 (env BIZINFO_API_KEY).
+ * Key: https://www.bizinfo.go.kr/apiList.do (정책정보 개방) → 지원사업정보 API 사용 신청 → env BIZINFO_API_KEY.
  * Field names follow the public API docs; verify against a live response once a key is available.
  */
 const ENDPOINT = 'https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do';
 
-export type BizinfoItem = {
-  pblancId?: string;
-  pblancNm?: string;
-  pblancUrl?: string;
-  jrsdInsttNm?: string; // 소관기관
-  excInsttNm?: string; // 수행기관
-  reqstBeginEndDe?: string; // "YYYYMMDD ~ YYYYMMDD"
-  pldirSportRealmLclasCodeNm?: string; // 분야 (금융/기술/인력/수출/내수/창업/경영/기타)
-  hashtags?: string;
-  bsnsSumryCn?: string;
-  trgetNm?: string;
+/**
+ * The docs list RSS-style field names (title, seq, link, reqstDt, author, lcategory) while the field names
+ * I first assumed for JSON were pblancNm/pblancId/… . Accept both; `probe:bizinfo` shows which the live API uses.
+ */
+export const FIELD_ALIASES = {
+  id: ['pblancId', 'seq'],
+  title: ['pblancNm', 'title'],
+  url: ['pblancUrl', 'link'],
+  agency: ['jrsdInsttNm', 'author'],
+  executor: ['excInsttNm'],
+  period: ['reqstBeginEndDe', 'reqstDt'],
+  category: ['pldirSportRealmLclasCodeNm', 'lcategory'],
+  hashtags: ['hashtags'],
+  summary: ['bsnsSumryCn', 'description'],
+  target: ['trgetNm'],
+} as const;
+
+export type BizinfoItem = Record<string, unknown>;
+
+const pick = (item: BizinfoItem, field: keyof typeof FIELD_ALIASES): string => {
+  for (const key of FIELD_ALIASES[field]) {
+    const v = item[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number') return String(v);
+  }
+  return '';
 };
 
 export function normalizeBizinfo(item: BizinfoItem, collectedAt = new Date().toISOString()): Announcement | null {
-  if (!item.pblancId || !item.pblancNm) return null;
-  const summary = stripHtml(item.bsnsSumryCn);
-  const text = [item.pblancNm, item.pldirSportRealmLclasCodeNm, item.hashtags, summary, item.trgetNm].join(' ');
-  const period = parsePeriod(item.reqstBeginEndDe);
-  const url = item.pblancUrl ?? '';
+  const id = pick(item, 'id');
+  const title = pick(item, 'title');
+  if (!id || !title) return null;
+  const summary = stripHtml(pick(item, 'summary'));
+  const category = pick(item, 'category');
+  const hashtags = pick(item, 'hashtags');
+  const target = pick(item, 'target');
+  const agency = pick(item, 'agency');
+  const executor = pick(item, 'executor');
+  const period = parsePeriod(pick(item, 'period'));
+  const url = pick(item, 'url');
   return {
-    id: `bizinfo:${item.pblancId}`,
+    id: `bizinfo:${id}`,
     source: 'bizinfo',
-    title: item.pblancNm.trim(),
-    url: url.startsWith('http') ? url : url ? `https://www.bizinfo.go.kr${url}` : '',
-    agency: item.jrsdInsttNm ?? item.excInsttNm ?? '',
+    title,
+    url: url.startsWith('http') ? url : url ? `https://www.bizinfo.go.kr${url.startsWith('/') ? '' : '/'}${url}` : '',
+    agency: agency || executor,
     summary: summary.slice(0, 400),
-    target: item.trgetNm ?? '',
-    supportTypes: classifySupportTypes(`${item.pldirSportRealmLclasCodeNm ?? ''} ${item.pblancNm} ${item.hashtags ?? ''}`),
-    regions: classifyRegions(`${item.jrsdInsttNm ?? ''} ${item.excInsttNm ?? ''} ${item.pblancNm} ${item.hashtags ?? ''}`),
-    industries: classifyIndustries(text),
+    target,
+    supportTypes: classifySupportTypes(`${category} ${title} ${hashtags}`),
+    regions: classifyRegions(`${agency} ${executor} ${title} ${hashtags}`),
+    industries: classifyIndustries([title, category, hashtags, summary, target].join(' ')),
     applyStart: period.start,
     applyEnd: period.end,
     collectedAt,
   };
 }
 
-export async function fetchBizinfo(apiKey: string, count = 100): Promise<Announcement[]> {
-  const url = `${ENDPOINT}?crtfcKey=${encodeURIComponent(apiKey)}&dataType=json&searchCnt=${count}`;
-  const res = await fetch(url, {signal: AbortSignal.timeout(20_000)});
+type Page = {jsonArray?: BizinfoItem[] | BizinfoItem; reqErr?: string};
+
+export async function fetchBizinfoPage(apiKey: string, pageIndex: number, pageUnit: number, fetchImpl: typeof fetch = fetch): Promise<BizinfoItem[]> {
+  const url = `${ENDPOINT}?crtfcKey=${encodeURIComponent(apiKey)}&dataType=json&pageUnit=${pageUnit}&pageIndex=${pageIndex}&searchCnt=${pageUnit}`;
+  const res = await fetchImpl(url, {signal: AbortSignal.timeout(20_000)});
   if (!res.ok) throw new Error(`bizinfo HTTP ${res.status}`);
-  const data = (await res.json()) as {jsonArray?: BizinfoItem[]; reqErr?: string};
+  const body = await res.text();
+  let data: Page;
+  try {
+    data = JSON.parse(body) as Page;
+  } catch {
+    // Errors/maintenance/blocked requests usually come back as HTML or XML.
+    throw new Error(`bizinfo returned non-JSON: ${body.replace(/\s+/g, ' ').slice(0, 120)}`);
+  }
   if (data.reqErr) throw new Error(`bizinfo error: ${data.reqErr}`);
+  const arr = data.jsonArray;
+  return Array.isArray(arr) ? arr : arr ? [arr] : [];
+}
+
+/**
+ * Fetches up to `maxPages` pages. Stops early on a short page, or when a page adds no new
+ * ids (guards against the API ignoring the paging parameters and repeating page 1).
+ */
+export async function fetchBizinfo(
+  apiKey: string,
+  opts: {pageUnit?: number; maxPages?: number; fetchImpl?: typeof fetch} = {},
+): Promise<Announcement[]> {
+  const {pageUnit = 100, maxPages = 5, fetchImpl = fetch} = opts;
+  const seen = new Map<string, Announcement>();
   const now = new Date().toISOString();
-  return (data.jsonArray ?? []).map((i) => normalizeBizinfo(i, now)).filter((a): a is Announcement => a !== null);
+  for (let page = 1; page <= maxPages; page++) {
+    const items = await fetchBizinfoPage(apiKey, page, pageUnit, fetchImpl);
+    const before = seen.size;
+    for (const item of items) {
+      const a = normalizeBizinfo(item, now);
+      if (a) seen.set(a.id, a);
+    }
+    if (items.length < pageUnit || seen.size === before) break;
+  }
+  return [...seen.values()];
 }

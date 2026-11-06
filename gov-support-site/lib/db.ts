@@ -31,6 +31,16 @@ CREATE TABLE IF NOT EXISTS announcements (
   collected_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS announcements_apply_end_idx ON announcements (apply_end);
+CREATE TABLE IF NOT EXISTS collect_runs (
+  id          bigserial PRIMARY KEY,
+  source      text NOT NULL,
+  started_at  timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  status      text NOT NULL,
+  fetched     int NOT NULL DEFAULT 0,
+  added       int NOT NULL DEFAULT 0,
+  error       text
+);
 CREATE TABLE IF NOT EXISTS sent_announcements (
   email           text NOT NULL REFERENCES subscribers(email) ON DELETE CASCADE,
   announcement_id text NOT NULL,

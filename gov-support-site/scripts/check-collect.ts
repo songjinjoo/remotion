@@ -103,3 +103,34 @@ assert.ok(verifyUnsubscribe('a@b.co', tok));
 assert.ok(!verifyUnsubscribe('x@b.co', tok));
 assert.ok(!verifyUnsubscribe('a@b.co', 'bad'));
 console.log('digest ok');
+
+// --- bizinfo: both field-name schemes, paging, error handling ---
+import {fetchBizinfo, normalizeBizinfo as nb} from '../lib/sources/bizinfo';
+import {parsePeriod} from '../lib/normalize';
+const rss = nb({seq: 'PBLN_9', title: '부산 수출 마케팅 지원', link: '/web/x?pblancId=PBLN_9', author: '부산광역시', reqstDt: '2026-11-01 ~ 2026-11-30', lcategory: '수출', trgetNm: '중소기업'}, 'x')!;
+assert.equal(rss.id, 'bizinfo:PBLN_9');
+assert.equal(rss.url, 'https://www.bizinfo.go.kr/web/x?pblancId=PBLN_9');
+assert.deepEqual(rss.regions, ['부산']);
+assert.ok(rss.supportTypes.includes('수출·마케팅'));
+assert.equal(rss.applyEnd, '2026-11-30');
+assert.deepEqual(parsePeriod('2026.11.01~2026.11.30'), {start: '2026-11-01', end: '2026-11-30'});
+assert.deepEqual(parsePeriod('상시'), {start: null, end: null});
+assert.equal(nb({pblancId: 7, pblancNm: '숫자 id'})!.id, 'bizinfo:7');
+assert.equal(nb({title: 'id 없음'}), null);
+
+const respond = (body: string, status = 200): typeof fetch => (async () => new Response(body, {status})) as typeof fetch;
+const pagesOf = (pages: object[][]) => {
+  let n = 0;
+  return (async () => new Response(JSON.stringify({jsonArray: pages[Math.min(n++, pages.length - 1)]}))) as typeof fetch;
+};
+const item = (i: number) => ({pblancId: `P${i}`, pblancNm: `공고 ${i}`});
+(async () => {
+  assert.equal((await fetchBizinfo('k', {pageUnit: 2, fetchImpl: pagesOf([[item(1), item(2)], [item(3), item(4)], [item(5)]])})).length, 5, 'follows pages until a short page');
+  assert.equal((await fetchBizinfo('k', {pageUnit: 2, maxPages: 10, fetchImpl: pagesOf([[item(1), item(2)]])})).length, 2, 'stops when paging params are ignored');
+  assert.equal((await fetchBizinfo('k', {pageUnit: 2, maxPages: 2, fetchImpl: pagesOf([[item(1), item(2)], [item(3), item(4)], [item(5), item(6)]])})).length, 4, 'respects maxPages');
+  await assert.rejects(fetchBizinfo('k', {fetchImpl: respond('<html>점검 중</html>')}), /non-JSON/);
+  await assert.rejects(fetchBizinfo('k', {fetchImpl: respond('{"reqErr":"인증키 오류"}')}), /인증키 오류/);
+  await assert.rejects(fetchBizinfo('k', {fetchImpl: respond('x', 500)}), /HTTP 500/);
+  assert.equal((await fetchBizinfo('k', {fetchImpl: respond('{"jsonArray":{"pblancId":"S","pblancNm":"단건"}}')})).length, 1, 'single object response');
+  console.log('bizinfo ok');
+})();

@@ -47,13 +47,10 @@ export function classifyRegions(text: string): string[] {
   return found.size ? [...found] : ['전국'];
 }
 
-const ymd = (s: string) =>
-  /^\d{8}$/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : null;
-
-/** Parses "20241101 ~ 20241130"; anything else (상시, 예산 소진시 …) → nulls. */
+/** Parses "20241101 ~ 20241130" / "2024-11-01 ~ 2024-11-30" / "2024.11.01~2024.11.30"; anything else (상시, 예산 소진시 …) → nulls. */
 export function parsePeriod(raw: string | undefined): {start: string | null; end: string | null} {
-  const m = (raw ?? '').match(/(\d{8})\s*~\s*(\d{8})/);
-  return m ? {start: ymd(m[1]), end: ymd(m[2])} : {start: null, end: null};
+  const m = (raw ?? '').match(/(\d{4})\D?(\d{2})\D?(\d{2})\s*~\s*(\d{4})\D?(\d{2})\D?(\d{2})/);
+  return m ? {start: `${m[1]}-${m[2]}-${m[3]}`, end: `${m[4]}-${m[5]}-${m[6]}`} : {start: null, end: null};
 }
 
 export const stripHtml = (s: string | undefined) =>

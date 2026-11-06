@@ -2,6 +2,7 @@
 
 import {useCallback, useState} from 'react';
 import type {Announcement} from '@/lib/announcements';
+import type {CollectRun} from '@/lib/runs';
 
 const TEMPLATE =
   '제목,링크,기관,요약,지원분야,지역,업종,신청시작,신청종료\n' +
@@ -17,6 +18,7 @@ export function AdminClient() {
   const [msg, setMsg] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [items, setItems] = useState<Announcement[]>([]);
+  const [runs, setRuns] = useState<CollectRun[]>([]);
 
   const call = useCallback(
     async (init?: RequestInit, qs = '') => {
@@ -31,7 +33,11 @@ export function AdminClient() {
     [pw],
   );
 
-  const load = useCallback(async () => setItems((await call()).items), [call]);
+  const load = useCallback(async () => {
+    const d = await call();
+    setItems(d.items);
+    setRuns(d.runs ?? []);
+  }, [call]);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -111,6 +117,18 @@ export function AdminClient() {
             {result.errors.length > 0 && <ul className="error">{result.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
           </div>
         )}
+      </section>
+
+      <section className="card">
+        <h2 style={{margin: 0}}>자동 수집 이력</h2>
+        {runs.length === 0 && <p className="hint">아직 실행 기록이 없습니다.</p>}
+        {runs.map((r) => (
+          <div key={r.id} className="hint" style={{textAlign: 'left', color: r.status === 'ok' ? undefined : '#d92d20'}}>
+            {r.startedAt.slice(0, 16).replace('T', ' ')} UTC · {r.source} · {r.status}
+            {r.status !== 'skipped' && ` · 수집 ${r.fetched}건 / 신규 ${r.added}건`}
+            {r.error && ` · ${r.error}`}
+          </div>
+        ))}
       </section>
 
       <section className="card">

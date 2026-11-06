@@ -1,6 +1,7 @@
 import {NextResponse} from 'next/server';
 import {deleteAnnouncement, readAnnouncements, saveAnnouncements} from '@/lib/announcements';
 import {isAdmin} from '@/lib/adminAuth';
+import {recentRuns} from '@/lib/runs';
 import {csvToRows, importRows, type RawRow} from '@/lib/import';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,8 @@ const unauthorized = () => NextResponse.json({error: '관리자 인증에 실패
 
 export async function GET(req: Request) {
   if (!isAdmin(req)) return unauthorized();
-  return NextResponse.json({items: await readAnnouncements()});
+  const [items, runs] = await Promise.all([readAnnouncements(), recentRuns(5)]);
+  return NextResponse.json({items, runs});
 }
 
 /** Body: {format: 'csv', data: string} | {format: 'json', data: object[] | string} | {format: 'single', data: object} */
