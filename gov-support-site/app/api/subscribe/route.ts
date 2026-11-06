@@ -38,6 +38,12 @@ export async function POST(req: Request) {
     );
   }
 
+  const keywords = (Array.isArray(body.keywords) ? body.keywords : typeof body.keywords === 'string' ? body.keywords.split(/[,\n]/) : [])
+    .filter((k): k is string => typeof k === 'string')
+    .map((k) => k.trim().slice(0, 30))
+    .filter(Boolean)
+    .slice(0, 10);
+
   const stage = BUSINESS_STAGES.find((s) => s === body.stage) ?? BUSINESS_STAGES[0];
   const frequency = FREQUENCIES.find((f) => f === body.frequency) ?? FREQUENCIES[1];
 
@@ -46,6 +52,7 @@ export async function POST(req: Request) {
     industries,
     regions,
     supportTypes,
+    keywords,
     stage,
     frequency,
     createdAt: new Date().toISOString(),

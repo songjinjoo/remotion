@@ -53,3 +53,53 @@ assert.equal(parseDate('2026-02-30'), null);
 // TSV (copied from a spreadsheet)
 assert.equal(csvToRows('제목\t링크\n공고\thttps://a.kr').length, 1);
 console.log('import ok');
+
+// --- digest ---
+import {isSendDay, planDigest, renderDigest, kstToday} from '../lib/digest';
+import {unsubscribeToken, verifyUnsubscribe} from '../lib/unsubscribe';
+import type {Announcement} from '../lib/announcements';
+
+const mk = (id: string, o: Partial<Announcement>): Announcement => ({
+  id, source: 'manual', title: id, url: 'https://a.kr/' + id, agency: '', summary: '', target: '',
+  supportTypes: ['R&D'], regions: ['전국'], industries: [], applyStart: null, applyEnd: '2026-12-31',
+  collectedAt: '', ...o,
+});
+const anns = [
+  mk('plain', {applyEnd: '2026-11-20'}),
+  mk('kw', {title: '배터리 소재 R&D', applyEnd: '2026-12-20'}),
+  mk('soon', {applyStart: '2026-12-01', applyEnd: '2026-12-31'}),
+  mk('far', {applyStart: '2027-03-01'}), // beyond 60 days
+  mk('<script>x</script>', {title: '<img src=x onerror=alert(1)>', url: 'javascript:alert(1)'}),
+  mk('done', {applyEnd: '2026-10-01'}),
+  mk('other-type', {supportTypes: ['창업지원']}),
+];
+const dsub: Subscriber = {email: 'a@b.co', industries: [], regions: ['서울'], supportTypes: ['R&D'], keywords: ['배터리'], stage: '', frequency: '매일', createdAt: ''};
+const today = '2026-11-06';
+const plan = planDigest(dsub, anns, today);
+assert.deepEqual(plan.open.map((a) => a.id).slice(0, 2), ['kw', 'plain'], 'keyword hit ranks first');
+assert.deepEqual(plan.upcoming.map((a) => a.id), ['soon']);
+assert.ok(!plan.ids.includes('far') && !plan.ids.includes('done') && !plan.ids.includes('other-type'));
+// dedupe
+const plan2 = planDigest({...dsub, sentIds: plan.ids}, anns, today);
+assert.equal(plan2.ids.length, 0);
+// escaping + javascript: url dropped
+const mail = renderDigest(dsub, plan, 'https://s/u?x=1&y=2', today);
+assert.ok(!mail.html.includes('<img src=x'), 'title escaped');
+assert.ok(!mail.html.includes('javascript:'), 'unsafe url removed');
+assert.ok(mail.html.includes('&lt;img src=x'));
+assert.ok(mail.text.includes('수신 거부'));
+assert.ok(mail.subject.includes(`${plan.ids.length}건`));
+// weekly: Monday only (2026-11-09 is Monday KST)
+const weekly = {...dsub, frequency: '주 1회'};
+assert.equal(isSendDay(weekly, new Date('2026-11-09T01:00:00Z')), true);
+assert.equal(isSendDay(weekly, new Date('2026-11-10T01:00:00Z')), false);
+assert.equal(isSendDay(dsub, new Date('2026-11-10T01:00:00Z')), true);
+// KST rollover: 2026-11-08 20:00Z is already Monday 05:00 KST
+assert.equal(kstToday(new Date('2026-11-08T20:00:00Z')), '2026-11-09');
+// unsubscribe token
+process.env.UNSUBSCRIBE_SECRET = 'test-secret';
+const tok = unsubscribeToken('A@b.co');
+assert.ok(verifyUnsubscribe('a@b.co', tok));
+assert.ok(!verifyUnsubscribe('x@b.co', tok));
+assert.ok(!verifyUnsubscribe('a@b.co', 'bad'));
+console.log('digest ok');

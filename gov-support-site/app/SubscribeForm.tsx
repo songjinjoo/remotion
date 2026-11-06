@@ -45,6 +45,7 @@ export function SubscribeForm() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [regions, setRegions] = useState<string[]>([]);
   const [supportTypes, setSupportTypes] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState('');
   const [stage, setStage] = useState<string>(BUSINESS_STAGES[0]);
   const [frequency, setFrequency] = useState<string>(FREQUENCIES[1]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done'>('idle');
@@ -58,7 +59,7 @@ export function SubscribeForm() {
       const res = await fetch('/api/subscribe', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email, industries, regions, supportTypes, stage, frequency}),
+        body: JSON.stringify({email, industries, regions, supportTypes, keywords, stage, frequency}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? '신청에 실패했습니다.');
@@ -105,6 +106,16 @@ export function SubscribeForm() {
         <span className="label">업종 (복수 선택)</span>
         <Chips name="업종" options={INDUSTRIES} selected={industries} onToggle={(v) => setIndustries(toggle(industries, v))} />
       </div>
+
+      <label>
+        <span className="label">관심 키워드 (선택, 쉼표로 구분)</span>
+        <input
+          placeholder="예: 배터리 소재, 스마트팜, 수출바우처"
+          value={keywords}
+          maxLength={200}
+          onChange={(e) => setKeywords(e.target.value)}
+        />
+      </label>
 
       <div className="row">
         <label>
